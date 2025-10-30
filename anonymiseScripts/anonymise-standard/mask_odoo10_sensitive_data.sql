@@ -3,7 +3,6 @@
 -- ===============================
 -- TRUNCATE TABLES
 -- ===============================
-TRUNCATE res_partner_attributes;
 TRUNCATE failed_events;
 TRUNCATE mail_message CASCADE;
 TRUNCATE mail_followers CASCADE;
@@ -25,7 +24,7 @@ WHERE login NOT IN ('admin', 'emrsync');
 
 -- Set everyone's password as 'password' (hashed)
 UPDATE res_users
-SET password = '$1$lw8k34ec$xOY5xkPtTgTw/gN6nHiZq.'  -- hashed password placeholder
+SET password = '$1$lw8k34ec$xOY5xkPtTgTw/gN6nHiZq.'
 WHERE login NOT IN ('admin', 'emrsync');
 
 -- ===============================
@@ -97,3 +96,4 @@ SELECT id, name, res_field, db_datas IS NULL AS image_removed
 FROM ir_attachment
 WHERE res_model = 'res.partner' AND res_field LIKE 'image%'
 LIMIT 5;
+
