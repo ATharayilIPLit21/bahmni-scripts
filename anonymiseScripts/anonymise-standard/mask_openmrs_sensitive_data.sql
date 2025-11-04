@@ -14,13 +14,22 @@ TRUNCATE TABLE failed_events;
 SET FOREIGN_KEY_CHECKS=1;
 
 -- 2️⃣ Mask person names
-UPDATE person_name
-SET given_name = CONCAT('Patient', person_id),
-    middle_name = CONCAT('Patient', person_id),
-    family_name = CONCAT('Patient', person_id)
-WHERE person_id NOT IN (
-    SELECT person_id FROM users WHERE username IN ('admin','superman','superuser')
-);
+-- 2️⃣ Mask person names with alphabetic suffixes
+SET @counter := 0;
+
+UPDATE person_name pn
+JOIN (
+    SELECT person_id, CHAR(65 + (@counter := @counter + 1) % 26) AS suffix
+    FROM person_name
+    WHERE person_id NOT IN (
+        SELECT person_id FROM users WHERE username IN ('admin','superman','superuser')
+    )
+    ORDER BY person_id
+) AS tmp ON pn.person_id = tmp.person_id
+SET 
+    pn.given_name = CONCAT('Patient', tmp.suffix),
+    pn.middle_name = CONCAT('Patient', tmp.suffix),
+    pn.family_name = CONCAT('Patient', tmp.suffix);
 
 -- Verify the changes in person_name
 SELECT person_id, given_name, middle_name, family_name
