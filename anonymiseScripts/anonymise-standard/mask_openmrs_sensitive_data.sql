@@ -14,74 +14,39 @@ TRUNCATE TABLE failed_events;
 SET FOREIGN_KEY_CHECKS=1;
 
 -- 2️⃣ Mask person names
-DROP TABLE IF EXISTS random_names;
+UPDATE person_name
+SET given_name = CONCAT('Patient', person_id),
+    middle_name = CONCAT('Patient', person_id),
+    family_name = CONCAT('Patient', person_id)
+WHERE person_id NOT IN (
+    SELECT person_id FROM users WHERE username IN ('admin','superman','superuser')
+);
 
-CREATE TABLE random_names (
-  rid INT NOT NULL AUTO_INCREMENT,
-  name VARCHAR(255) NOT NULL,
-  PRIMARY KEY (rid),
-  UNIQUE KEY name (name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+-- Verify the changes in person_name
+SELECT person_id, given_name, middle_name, family_name
+FROM person_name
+WHERE given_name LIKE 'Patient%' LIMIT 5;
 
-INSERT IGNORE INTO  random_names (name)
-SELECT DISTINCT TRIM(given_name) FROM person_name WHERE given_name IS NOT NULL;
-INSERT IGNORE INTO random_names (name)
-SELECT DISTINCT TRIM(middle_name) FROM person_name WHERE middle_name IS NOT NULL;
-INSERT IGNORE INTO random_names (name)
-SELECT DISTINCT TRIM(family_name) FROM person_name WHERE family_name IS NOT NULL;
-
-DROP PROCEDURE IF EXISTS randomize_names;
-DELIMITER //
-CREATE PROCEDURE randomize_names()
-BEGIN
-  DECLARE _size INT;
-  DECLARE _start INT DEFAULT 0;
-  DECLARE _stepsize INT DEFAULT 300;
-
-  SELECT MAX(person_name_id) INTO _size FROM person_name;
-
-  WHILE _start < _size DO
-    UPDATE person_name
-    SET given_name = (
-        SELECT name FROM (
-            SELECT rn.rid, rn.name
-            FROM random_names rn
-            ORDER BY RAND()
-            LIMIT 1
-        ) tmp
-    ),
-    middle_name = given_name,
-    family_name = middle_name
-    WHERE person_name_id BETWEEN _start AND (_start + _stepsize);
-
-    SET _start = _start + _stepsize + 1;
-  END WHILE;
-END;
-//
-DELIMITER ;
-
-CALL randomize_names();
-DROP PROCEDURE IF EXISTS randomize_names;
-
--- 3️⃣ Mask birthdates
+-- 3️⃣ Mask birthdates (simple +/- 90 days)
 UPDATE person
-SET birthdate = DATE_ADD(birthdate, INTERVAL FLOOR(RAND()*182-182) DAY)
-WHERE birthdate IS NOT NULL AND DATEDIFF(NOW(), birthdate) > 15*365;
+SET birthdate = DATE_ADD(birthdate, INTERVAL FLOOR(RAND()*180-90) DAY)
+WHERE birthdate IS NOT NULL;
 
+-- Verify the changes in person birthdate
+SELECT person_id, birthdate
+FROM person
+WHERE birthdate IS NOT NULL LIMIT 5;
+
+-- 4️⃣ Mask death dates (simple +/- 90 days)
 UPDATE person
-SET birthdate = DATE_ADD(birthdate, INTERVAL FLOOR(RAND()*91-91) DAY)
-WHERE birthdate IS NOT NULL AND DATEDIFF(NOW(), birthdate) BETWEEN 5*365 AND 15*365;
-
-UPDATE person
-SET birthdate = DATE_ADD(birthdate, INTERVAL FLOOR(RAND()*30-30) DAY)
-WHERE birthdate IS NOT NULL AND DATEDIFF(NOW(), birthdate) < 5*365;
-
-UPDATE person SET birthdate_estimated = CAST(RAND() AS SIGNED);
-
--- 4️⃣ Mask death dates
-UPDATE person
-SET death_date = DATE_ADD(death_date, INTERVAL FLOOR(RAND()*91-91) DAY)
+SET death_date = DATE_ADD(death_date, INTERVAL FLOOR(RAND()*180-90) DAY)
 WHERE death_date IS NOT NULL;
+
+-- Verify the changes in person death_date
+SELECT person_id, death_date
+FROM person
+WHERE death_date IS NOT NULL LIMIT 5;
+
 
 -- 5️⃣ Mask person addresses
 UPDATE person_address
@@ -94,87 +59,51 @@ SET address1 = CONCAT('address1-', person_id),
     date_voided = NOW();
 
 
+
+-- Verify the changes in person_address
+SELECT person_id, address1, address2, latitude, longitude
+FROM person_address
+WHERE address1 LIKE 'Address1-%' LIMIT 5;
+
 -- 6️⃣ Mask locations
 UPDATE location
 SET name = CONCAT('Location-', location_id);
 
--- 7️⃣ Mask users
+-- Verify the changes in location
+SELECT location_id, name
+FROM location
+WHERE name LIKE 'Location-%' LIMIT 5;
+
+-- 7️⃣ Mask usernames and passwords
 UPDATE users
-SET username = CONCAT('username-', user_id)
+SET username = CONCAT('username-', user_id),
+    password = 'dummy_password'
 WHERE username NOT IN ('admin', 'superman', 'superuser');
 
-UPDATE users
-SET password = '4a1750c8607dfa237de36c6305715c223415189',
-    salt = 'c788c6ad82a157b712392ca695dfcf2eed193d7f',
-    secret_question = NULL,
-    secret_answer = NULL
-WHERE username NOT IN ('admin', 'superman', 'superuser');
+-- Verify the changes in users
+SELECT user_id, username, password
+FROM users
+WHERE username NOT IN ('admin', 'superman', 'superuser') LIMIT 5;
 
-UPDATE global_property
-SET property_value = 'admin'
-WHERE property LIKE '%.username';
-
-UPDATE global_property
-SET property_value = 'test'
-WHERE property LIKE '%.password';
-
--- 8️⃣ Mask patient identifiers
-DROP TABLE IF EXISTS temp_patient_identifier_old;  -- <-- add this line
-CREATE TABLE temp_patient_identifier_old(patient_id INT, identifier VARCHAR(256), PRIMARY KEY(patient_id));
-INSERT INTO temp_patient_identifier_old SELECT patient_id, identifier FROM patient_identifier;
-
-
-
-TRUNCATE patient_identifier;
-
-INSERT INTO patient_identifier (patient_id, identifier, identifier_type, location_id, preferred, creator, date_created, voided, uuid)
-SELECT p.patient_id,
-       CONCAT((SELECT prefix FROM idgen_seq_id_gen ORDER BY RAND() LIMIT 1), p.patient_id),
-       (SELECT patient_identifier_type_id FROM patient_identifier_type WHERE name = 'Bahmni Id'),
-       1, 1, 1, '20080101', 0, UUID()
-FROM patient p;
-
-CREATE TABLE temp_person_uuid_old(person_id INT, uuid VARCHAR(256), PRIMARY KEY(person_id));
-INSERT INTO temp_person_uuid_old SELECT person_id, uuid FROM person;
-
--- 9️⃣ Mask person attributes
+-- 8️⃣ Mask person attributes
 UPDATE person_attribute pa
-INNER JOIN person_attribute_type pat ON pa.person_attribute_type_id = pat.person_attribute_type_id
-SET pa.value = CONCAT('primaryRelative-', pa.person_id)
-WHERE pat.name = 'primaryRelative';
+JOIN person_attribute_type pat ON pa.person_attribute_type_id = pat.person_attribute_type_id
+SET pa.value = CONCAT(pat.name, '-', pa.person_id)
+WHERE pat.name IN ('primaryRelative', 'primaryContact');
 
-UPDATE person_attribute pa
-INNER JOIN person_attribute_type pat ON pa.person_attribute_type_id = pat.person_attribute_type_id
-SET pa.value = FLOOR(POW(10,9) + RAND() * (POW(10,10) - POW(10,9)))
-WHERE pat.name = 'primaryContact';
-
-DELETE pa
+-- Verify the changes in person_attribute
+SELECT pa.person_id, pa.value, pat.name
 FROM person_attribute pa
-INNER JOIN person_attribute_type pat ON pa.person_attribute_type_id = pat.person_attribute_type_id
+JOIN person_attribute_type pat ON pa.person_attribute_type_id = pat.person_attribute_type_id
+WHERE pat.name IN ('primaryRelative', 'primaryContact') LIMIT 5;
+
+-- 9️⃣ Clear sensitive local names
+DELETE pa FROM person_attribute pa
+JOIN person_attribute_type pat ON pa.person_attribute_type_id = pat.person_attribute_type_id
 WHERE pat.name IN ('givenNameLocal', 'familyNameLocal', 'middleNameLocal');
 
--- 🔟 Mask visit, encounter, obs dates
-ALTER TABLE visit ADD COLUMN rand_increment INT;
-
-UPDATE visit
-SET rand_increment = CAST(RAND()*91-91 AS SIGNED),
-    date_started = ADDDATE(date_started, rand_increment),
-    date_stopped = IF(date_stopped IS NULL, NULL, ADDDATE(date_stopped, rand_increment)),
-    date_voided = IF(date_voided IS NULL, NULL, ADDDATE(date_voided, rand_increment)),
-    date_created = ADDDATE(date_created, rand_increment);
-
-UPDATE encounter e
-JOIN visit v ON e.visit_id = v.visit_id
-SET e.encounter_datetime = ADDDATE(e.encounter_datetime, v.rand_increment),
-    e.date_voided = IF(e.date_voided IS NULL, NULL, ADDDATE(e.date_voided, v.rand_increment)),
-    e.date_created = ADDDATE(e.date_created, v.rand_increment);
-
-UPDATE obs o
-JOIN encounter e ON e.encounter_id = o.encounter_id
-JOIN visit v ON e.visit_id = v.visit_id
-SET o.obs_datetime = ADDDATE(o.obs_datetime, v.rand_increment),
-    o.date_created = ADDDATE(o.date_created, v.rand_increment),
-    o.date_voided = IF(o.date_voided IS NULL, NULL, ADDDATE(o.date_voided, v.rand_increment)),
-    o.value_datetime = IF(o.value_datetime IS NULL, NULL, ADDDATE(o.value_datetime, v.rand_increment));
-
-ALTER TABLE visit DROP COLUMN rand_increment;
+-- Verify that the sensitive local names were deleted
+SELECT person_id, pa.value, pat.name
+FROM person_attribute pa
+JOIN person_attribute_type pat ON pa.person_attribute_type_id = pat.person_attribute_type_id
+WHERE pat.name IN ('givenNameLocal', 'familyNameLocal', 'middleNameLocal') LIMIT 5;
